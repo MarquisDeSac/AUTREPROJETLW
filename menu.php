@@ -4,19 +4,31 @@
 require_once('bibli_erestou.php');
 require_once('bibli_generale.php');
 $GLOBALS['bd'] = bdConnect();
-$GLOBALS['cbIndex'] = 1;
+$GLOBALS['cbIndex']=0;
 
 // bufferisation des sorties
 ob_start();
 
 // démarrage ou reprise de la session
 session_start();
-//
+$erreurDansLeFormulaire = false; // Supposons qu'il n'y a pas d'erreur au début
+
 if (isset($_POST['btnCommander'])) {
-    traitementMenuL();
-}
-else{
-    $erreurs = null;
+    $erreurs = traitementMenuL($_POST);
+
+    // Si le tableau $erreurs n'est pas vide, cela signifie qu'une erreur s'est produite
+    if (!empty($erreurs)) {
+        $erreurDansLeFormulaire = true;
+    }
+
+    if ($erreurDansLeFormulaire) {
+        $_SESSION['error'] = true;
+        $_SESSION['previousChoices'] = $_POST;  // Stockez les choix de l'utilisateur dans la session
+    } else {
+        // Réinitialisez les valeurs dans la session si la soumission a été réussie
+        unset($_SESSION['error']);
+        unset($_SESSION['previousChoices']);
+    }
 }
 // affichage de l'entête
 affEntete('Menus et repas');
@@ -24,7 +36,7 @@ affEntete('Menus et repas');
 affNav();
 
 // contenu de la page 
-affContenuL();
+affContenuL (  $AdejaCommander = false);
 
 
 // fin du script --> envoi de la page 
@@ -200,7 +212,7 @@ function bdMenuL(int $date, array &$menu) : bool {
 
 
 
-
+$estConnecter =estAuthentifie();
 
 
 
@@ -213,10 +225,8 @@ function bdMenuL(int $date, array &$menu) : bool {
  *
  * @return void
  */
-$estConnecter =estAuthentifie();
 
-function affPlatL(array $p, string $catAff,bool $estConnecter,array $idCommande = [] ): void {
-    $AdejaCommander = true;
+ function affPlatL(array $p, string $catAff, bool $estConnecter, bool $AdejaCommander, array $idCommande = []): void {
     if ($catAff == 'suppléments' ){ //number
         $id = $name = "nb{$p['plID']}";
         $type = 'number';
@@ -236,54 +246,36 @@ function affPlatL(array $p, string $catAff,bool $estConnecter,array $idCommande 
         $type = 'checkbox';
      
     }
-
-    //connecter et date changer le disabled
-    if($estConnecter && dateConsulteeL() == DATE_AUJOURDHUI){
-        $disabled = '';
-    }
-    else{
+    //si la date est inferieur a la date d aujourdhui on ne peut pas commander
+    //disabled and checked
+    $disabled = '';
+    $check = '';
+    if(!isset($_SESSION['usID'])){
         $disabled = 'disabled';
     }
+    //si on est connecté et la date consultée est antérieure à aujourd'hui
+    if($estConnecter && dateConsulteeL() <DATE_AUJOURDHUI ){
+        $disabled = 'disabled' ;
+    }
+//si on est connecté, la date consultée est aujourd'hui et on a déjà commandé
+if ($estConnecter && dateConsulteeL() == DATE_AUJOURDHUI && $AdejaCommander == true) {
+    $disabled = 'disabled';
+}
 
-    $check ='';
-    if (in_array($p['plID'], $idCommande)){
+    //si la date est superieur a la date d aujourdhui on ne peut pas commander
+    if($estConnecter && dateConsulteeL() > DATE_AUJOURDHUI ){
+        $disabled = 'disabled' ;
+    }
+    // Vérifier si l'utilisateur a déjà commandé ce plat
+    $idCommandeSet = array_flip($idCommande);  // Convertir l'array en un set
+    if (isset($idCommandeSet[$p['plID']])) {  // Vérifier si l'ID du plat est dans le set
         $check = 'checked';
-        
     }
-    //checker les plat deja commander
-    if(isset($_POST['btnCommander'])){
-        if(isset($_POST['radentrees'])){
-            if($_POST['radentrees'] == $p['plID']){
-                $check = 'checked';
-            }
+        // Si une erreur s'est produite et que l'utilisateur avait choisi ce plat, le marquer comme checked
+        if (isset($_SESSION['error']) && $_SESSION['error'] && isset($_SESSION['previousChoices']) && in_array($p['plID'], $_SESSION['previousChoices'])) {
+            $check = 'checked';
         }
-        if(isset($_POST['radplats'])){
-            if($_POST['radplats'] == $p['plID']){
-                $check = 'checked';
-            }
-        }
-        if(isset($_POST['raddesserts'])){
-            if($_POST['raddesserts'] == $p['plID']){
-                $check = 'checked';
-            }
-        }
-        if(isset($_POST['radboissons'])){
-            if($_POST['radboissons'] == $p['plID']){
-                $check = 'checked';
-            }
-        }
-        //checker les accompagnement
-        foreach($_POST as $cle => $val){
-            if (substr($cle, 0, 2) == 'cb'){
-                if($val == $p['plID']){
-                    $check = 'checked';
-                }
-            }
-        }
-
-    }
-
-      
+ 
     // protection des sorties contre les attaques XSS
     $p['plNom'] = htmlProtegerSorties($p['plNom']);
 
@@ -304,37 +296,53 @@ function affPlatL(array $p, string $catAff,bool $estConnecter,array $idCommande 
  * @return void
  */
 
- function traitementMenuL(): array {
+ function traitementMenuL($menu): array {
     $erreurs = [];
 
     // Vérification de la validité des paramètres reçus dans le formulaire
     //la demande doit contenir au minimum un accompagnement et une boisson
 
     if (isset($_POST['btnCommander'])) {
+        $AdejaCommander =true;
         if(!isset($_POST['radboissons'])){
             $erreurs[] = 'Vous devez choisir une boisson.';
         }
-       //verifier les accompagnement il faut au moins 1
+
+       //verifier les accompagnements il faut au moins 1
         $nbACOMP = 0;
         foreach($_POST as $cle => $val){
             if (substr($cle, 0, 2) == 'cb'){
                 $nbACOMP++;
             }
         }
+
         if($nbACOMP == 0){
             $erreurs[] = 'Vous devez choisir au moins un accompagnement.';
         }
-   
     }
+
+    // Aucune erreur, procéder à l'insertion dans la base de données
+    // Aucune erreur, procéder à l'insertion dans la base de données
+        // Aucune erreur, procéder à l'insertion dans la base de données
+// If there are no errors, proceed to the database insertion
+    if(empty($erreurs)){
+
+    }
+    
+
+
 
     return $erreurs;
 }
 
 
+
+
  
 
 //recuperer les commentaires
-function affCommentaires(int $date) : array {
+function affCommentaires($estConnecter,int $date, $AdejaCommander) : array {
+    if($estConnecter && dateConsulteeL() < DATE_AUJOURDHUI && $AdejaCommander == true){
     $bd = $GLOBALS['bd'];
     $sql = "SELECT usID, usNom, usPrenom, coDateRepas, coDatePublication, coUsager, coTexte, coNote
             FROM commentaire JOIN usager ON (coUsager = usID)
@@ -357,6 +365,8 @@ function affCommentaires(int $date) : array {
     else{
         $noteMoyenne = 0;
     }
+    echo '<h3> Commenataires </h3>';
+
     if($nombreCommentaires == 0){
         echo '<p>Il n\'y a pas encore de commentaire pour ce jour.</p>';
     }
@@ -365,6 +375,7 @@ function affCommentaires(int $date) : array {
         echo '<p>La note moyenne est de ', $noteMoyenne, ' / 5. sur la base de ',$nombreCommentaires,' commentaires</p>';
     }
     foreach($commentaires as $commentaire){
+        
         //date
         list($min,$heure,$jour,$mois,$annee) = getMinuteHeureJourMoisAnneeFromDate($commentaire['coDatePublication']);
         //ajouter une image pour le commentaire Celle-ci est donc située dans un dossier particulier nommé upload,
@@ -379,26 +390,103 @@ function affCommentaires(int $date) : array {
         $commentaire['coTexte'] = htmlProtegerSorties($commentaire['coTexte']);
         $commentaire['coNote'] = htmlProtegerSorties($commentaire['coNote']);
         //exemple commentaire de ERIC MErlet le 8 mars 2023 à 12h30
-        echo '<h2>Commentaire de ', $commentaire['usPrenom'], ' ', $commentaire['usNom'], ', publié le ', $jour, ' ', $mois, ' ', $annee, ' à ', $heure, 'h', $min, '</h2>';
+        echo '<h5 id = cmtar>Commentaire de ', $commentaire['usPrenom'], ' ', $commentaire['usNom'], ', publié le ', $jour, ' ', $mois, ' ', $annee, ' à ', $heure, 'h', $min, '</h2>';
         echo'<p class = "italique">',$commentaire['coTexte'],'</p>';
-        echo'<footer> NOTE: ',$commentaire['coNote'],'/5</footer>';    
+        echo'<footer> NOTE: ',$commentaire['coNote'],'/5</footer>'; 
+
         echo '</article>';
     }
-    
+
     mysqli_free_result($res);
     return $commentaires;
 
 }
 
+    return [];
+
+}
+
+function affNotice($estConnecter,$AdejaCommander)    {
+            //affichage de la notice
+            if($estConnecter && dateConsulteeL() == DATE_AUJOURDHUI && $AdejaCommander ==  false ){
+
+                echo "<div class = 'notice'>
+                <img  src = '../images/notice.png' class = 'noticeimage' alt = 'notice'>
+                    <div class = 'text'>
+                        Tous les plateaux sont composés avec un verre, un couteau, une fouchette et une petite cuillère.      
+                    <form action='menu.php' method='POST'>
+                    </div>
+                </div>";
+                }
+                
+            else{
+                $AdejaCommander = true;
+             }   
+}
+//s il n a pas encore commander 
+function affDivers($estConnecter, $AdejaCommander,$date){
+    if($estConnecter  && $AdejaCommander ==  false){ 
+        $bd = $GLOBALS['bd'];
+        $sql = "SELECT * FROM repas WHERE reDate = $date AND reUsager = {$_SESSION['usID']}";
+        //si res>0 alors il a deja commander et j affiche pas les divers
+        $res = bdSendRequest($bd, $sql);
+        if (mysqli_num_rows($res) > 0) {
+            $AdejaCommander = true;
+        }
+        if(mysqli_num_rows($res) == 0 && dateConsulteeL() == DATE_AUJOURDHUI){
+            $AdejaCommander = false;
+            echo '<h3>Supplément</h3>',
+            '<div class="supplement-container">',
+                '<div class="supplement">',
+                    '<label for="id18"><img src="../images/repas/38.jpg" alt="41">Pain </label>',
+                    '<input type="number" name="nbPains" value="0"  id="id18" min="0" max="2">',
+                    
+                '</div>',
+               ' <div class="supplement">',
+                    '<label for="id19"><img src="../images/repas/39.jpg" alt="42">Serviette en papier</label>',
+    
+                    '<input type="number" name="nbServiettes" value="1"  id="id19" min="1" max="5">',
+                '</div>',
+            '</div>',
+            '<h3>Validation</h3>',
+            '<div class ="validation-container">',
+            '<p id="validation"><img src="../images/attention.png" alt="attention" > Attention, une fois la commande réalisée, il n"est pas possible de la modifier.',
+            'Toute commande non-récupérée sera majorée d"une somme forfaitaire de 10 euros.',
+            '</p>',
+            '</div>',
+            
+        '<div class="submit-container">',
+            '<input type="submit" name="btnCommander" value="Commander" class="submit-btn click">',
+    
+            '<input type="submit" value="Annuler" class="submit-btn click">',
+        '</div>';
+        }
+        mysqli_free_result($res);
+        }
 
 
+
+     
+}
+
+//enregistrer le repas
+function enreg($date,$AdejaCommander){
+    if(isset($_POST['btnCommander'])){
+        echo '<div class="success">Votre commande a été enregistrée avec succès.</div>';
+        $AdejaCommander = true;
+
+
+    }
+
+
+}
 //_______________________________________________________________
 /**
  * Génère le contenu de la page.
  *
  * @return void
  */
-function affContenuL(): void {
+function affContenuL($AdejaCommander): void {
     $estConnecter =estAuthentifie();
     $date = dateConsulteeL();
     // si dateConsulteeL() renvoie une erreur
@@ -417,13 +505,14 @@ function affContenuL(): void {
     list($jour, $mois, $annee) = getJourMoisAnneeFromDate(DATE_AUJOURDHUI);
 
     $dateAUJ = DATE_AUJOURDHUI;
-    $AdejaCommander = true;
-    $peutCommander = false;
     $idCommande = [];
-
+//si on est connecter et que la date est inferieur a la date d aujourdhui
+//on verifie si on a deja commander
     if ($estConnecter) {
+        affNotice( $estConnecter, $AdejaCommander);
         $bd =$GLOBALS['bd'];
         if ($date < $dateAUJ) {
+            //selectionner les commandes
             $sql = "SELECT * FROM `repas` WHERE `reDate` = '" . $date . "' AND `reUsager` = '" . $_SESSION['usID'] . "'";
             $res = bdSendRequest($bd, $sql);
             if (mysqli_num_rows($res) > 0) {
@@ -435,11 +524,25 @@ function affContenuL(): void {
             }
             mysqli_free_result($res);
         }
-        if ($date == $dateAUJ && $AdejaCommander == false) {
-            $peutCommander = true;
+        if ($date == $dateAUJ ) {
+            //selectionner les commandes
+            $sql = "SELECT * FROM `repas` WHERE `reDate` = '" . $date . "' AND `reUsager` = '" . $_SESSION['usID'] . "'";
+            $res = bdSendRequest($bd, $sql);
+            if (mysqli_num_rows($res) > 0) {
+                $AdejaCommander = true;
+            } 
+            while ($tab = mysqli_fetch_assoc($res)) {
+                $idCommande[] = $tab['rePlat'];
+            
+            }
+            mysqli_free_result($res);
         }
 
     }
+
+   
+    // si on est connecter et que la date est superieur a la date d aujourdhui
+    //on verifie si on a deja commander
     
     // menu du jour
     $menu = [];
@@ -460,20 +563,11 @@ function affContenuL(): void {
                 );
    
     // affichage du menu
-    //affichage de la notice
-    if($estConnecter && dateConsulteeL() == DATE_AUJOURDHUI && !$peutCommander ){
-    echo "<div class = 'notice'>
-    <img  src = '../images/notice.png' class = 'noticeimage' alt = 'notice'>
-        <div class = 'text'>
-            Tous les plateaux sont composés avec un verre, un couteau, une fouchette et une petite cuillère.      
-        <form action='menu.php' method='POST'>
-        </div>
-    </div>";
-    }
+
 
     //affichage des erreurs
  
-    $erreurs = traitementMenuL();
+    $erreurs = traitementMenuL( $menu);
 
 if(count($erreurs) > 0){
     echo    '<div class="error">Les erreurs suivantes ont été rencontrées durant le traitement de votre commande :',
@@ -486,46 +580,9 @@ if(count($erreurs) > 0){
     
     echo '</ul></div>';
 }else{
-    if(isset($_POST['btnCommander'])){
-        echo '<div class="success">Votre commande a été enregistrée avec succès.</div>';
-        //enregistrer la commande dans la base de données
-        $portions = 1;
-        $reDate = dateConsulteeL();
-        $reUsager = $_SESSION['usID'];
-    
-        if(isset($_POST['nbPains'])){
-            $portions += $_POST['nbPains'];
-        }
-        if(isset($_POST['nbServiettes'])){
-            $portions += $_POST['nbServiettes'];
-        }
-        $bd=$GLOBALS['bd'];
-        
-        foreach($_POST as $cle => $val){
-            if (substr($cle, 0, 2) == 'cb'){
-                $sql = "SELECT 1 FROM repas WHERE reDate = '$reDate' AND rePlat = $val AND reUsager = $reUsager";
-                $res = bdSendRequest($bd, $sql);
-                if (mysqli_num_rows($res) == 0){
-                    $sql = "INSERT INTO repas (reDate, rePlat, reUsager, reNbPortions) VALUES  ('$reDate', $val, $reUsager, $portions)";
-                    $res = bdSendRequest($bd, $sql);
-                }
-            }
-        }
-        $categorieArr = array('radentrees', 'radplats', 'raddesserts', 'radboissons');
-        foreach($categorieArr as $categorie){
-            if(isset($_POST[$categorie])){
-                $sql = "SELECT 1 FROM repas WHERE reDate = '$reDate' AND rePlat = '{$_POST[$categorie]}' AND reUsager = $reUsager";
-                $res = bdSendRequest($bd, $sql);
-                if (mysqli_num_rows($res) == 0){
-                    $sql = "INSERT INTO repas (reDate, rePlat, reUsager, reNbPortions) VALUES  ('$reDate', '{$_POST[$categorie]}', $reUsager, $portions)";
-                    $res = bdSendRequest($bd, $sql);
-                }
-            }
-        }
-
-    }
-    
+    enreg($date,$AdejaCommander);
 }
+
 
     
 
@@ -537,7 +594,8 @@ if(count($erreurs) > 0){
         
         echo '<section class="bcChoix"><h3>', $h3[$key], '</h3>';
         //afficher pas de plat pour ENTREE plat et dessert en utilisant un switch
-        if(!$peutCommander  && $estConnecter && dateConsulteeL() == DATE_AUJOURDHUI){
+        if( $estConnecter && dateConsulteeL() == DATE_AUJOURDHUI && $AdejaCommander ==  false){
+            
             switch($key)    {
                 case 'entrees':
                     echo '<input type = "radio" name = "radentrees" value="aucune" id="id0" >',
@@ -554,11 +612,12 @@ if(count($erreurs) > 0){
                     
             }
             
+            
 
         
         }
         foreach ($value as $p) {
-            affPlatL($p, $key, $estConnecter,$idCommande,$AdejaCommander);
+            affPlatL($p, $key, $estConnecter, $AdejaCommander, $idCommande );
         }
         echo '</section>';
         
@@ -566,47 +625,22 @@ if(count($erreurs) > 0){
     
     
     //affichage des suppléments
-    if($estConnecter && dateConsulteeL() == DATE_AUJOURDHUI  && $AdejaCommander ){
-        echo '<h3>Supplément</h3>',
-        '<div class="supplement-container">',
-            '<div class="supplement">',
-                '<label for="id18"><img src="../images/repas/38.jpg" alt="41">Pain </label>',
-                '<input type="number" name="nbPains" value="0"  id="id18" min="0" max="2">',
-                
-            '</div>',
-           ' <div class="supplement">',
-                '<label for="id19"><img src="../images/repas/39.jpg" alt="42">Serviette en papier</label>',
+    affDivers($estConnecter, $AdejaCommander,$date);
+    //affichage des commentaires
+    affCommentaires($estConnecter,$date, $AdejaCommander);
+    if($estConnecter && dateConsulteeL() < DATE_AUJOURDHUI && $AdejaCommander == true){
 
-                '<input type="number" name="nbServiettes" value="1"  id="id19" min="1" max="5">',
-            '</div>',
-        '</div>',
-        '<h3>Validation</h3>',
-        '<div class ="validation-container">',
-        '<p id="validation"><img src="../images/attention.png" alt="attention" > Attention, une fois la commande réalisée, il n"est pas possible de la modifier.',
-        'Toute commande non-récupérée sera majorée d"une somme forfaitaire de 10 euros.',
-        '</p>',
-        '</div>',
-        
-    '<div class="submit-container">',
-        '<input type="submit" name="btnCommander" value="Commander" class="submit-btn click">',
-
-        '<input type="submit" value="Annuler" class="submit-btn click">',
-    '</div>';
-  
-   
-    }else{
-         //affichage des commentaires
-         echo '<h3>Commentaires</h3>';
-         $commentaires = affCommentaires($date);
-  
+        echo '<Strong> <a href="commenter.php?meDate=',$date,'">Ecrire, Modifiez ou supprimer votre commentaire ICI!!</a></Strong>';
+        }   
     echo '</form>',
-    '</div>';
+    affPiedDePage();
+
+    echo '</div>';
 
 
  }
-}
 
-affPiedDePage();
+?>
 
 
 

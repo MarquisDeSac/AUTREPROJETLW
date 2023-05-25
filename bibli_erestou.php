@@ -23,8 +23,7 @@ define ('BD_SERVER', 'localhost');
 
 // Définit le fuseau horaire par défaut à utiliser. Disponible depuis PHP 5.1
 date_default_timezone_set('Europe/Paris');
-
-define ('DATE_AUJOURDHUI', date('20230519'));
+define ('DATE_AUJOURDHUI', date('Ymd'));
 define ('ANNEE_MAX', intdiv(DATE_AUJOURDHUI, 10000));
 define ('ANNEE_MIN', ANNEE_MAX - 1);
 
@@ -87,14 +86,21 @@ function affNav(string $prefixe = '..'): void {
     echo '<nav>',
             '<ul>',
                 '<li><a href="', $prefixe, '/index.php"><span>&#x2630;</span> Accueil</a></li>',
-                '<li><a href="', $prefixe, '/php/menu.php"><span>&#x2630;</span> Menus et repas</a></li>',
-                $login !== null ?
-                "<li><a href='{$prefixe}/php/deconnexion.php'><span>&#x2630;</span> Déconnexion [{$login}]</a></li>" :
-                "<li><a href='{$prefixe}/php/connexion.php'><span>&#x2630;</span> Connexion</a></li>",
-            '</ul>',
+                '<li><a href="', $prefixe, '/php/menu.php"><span>&#x2630;</span> Menus et repas</a></li>';
+
+    if (estAuthentifie()) {
+        echo "<li id='compte'><a href='{$prefixe}/php/monCompte.php'><span>&#x2630;</span> Mon compte</a></li>";
+    }
+
+    echo $login !== null ?
+        "<li><a href='{$prefixe}/php/deconnexion.php'><span>&#x2630;</span> Déconnexion [{$login}]</a></li>" :
+        "<li><a href='{$prefixe}/php/connexion.php'><span>&#x2630;</span> Connexion</a></li>";
+
+    echo '</ul>',
         '</nav>',
         '<main>';
 }
+
 
 
 //_______________________________________________________________

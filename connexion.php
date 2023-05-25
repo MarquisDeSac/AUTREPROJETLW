@@ -60,6 +60,10 @@ echo '<tr>',
     '<input type="hidden" name="referer" value="' . (isset($_SERVER['HTTP_REFERER']) ? htmlspecialchars($_SERVER['HTTP_REFERER']) : '') . '">',
 
 '</form>';
+//montrer un message vous etes bien connecté si l'authentification est réussie
+if (isset($usID)) {
+    echo '<p>Vous êtes bien connecté.</p>';
+}
 
 
 
